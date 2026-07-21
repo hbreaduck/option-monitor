@@ -1,0 +1,48 @@
+name: capture-snapshots
+
+# 미국장 시간(UTC)에 자동 실행 — 자는 동안 라이브 IV를 잡아 CSV에 기록.
+# GitHub Actions cron은 UTC 고정이라, 서머타임 유무와 무관하게 미국 정규장
+# 안에 드는 시각(대략 15:00 / 17:30 / 19:55 UTC)에 3번 캡처한다.
+#   15:00 UTC ≈ 한국 00:00 KST (미국 오전)
+#   17:30 UTC ≈ 한국 02:30 KST (미국 장중)
+#   19:55 UTC ≈ 한국 04:55 KST (미국 마감 직전, 하루치 완성) ⭐
+on:
+  schedule:
+    - cron: "0 15 * * 1-5"
+    - cron: "30 17 * * 1-5"
+    - cron: "55 19 * * 1-5"
+  workflow_dispatch: {}   # 수동 실행(테스트) 버튼
+
+permissions:
+  contents: write         # CSV를 저장소에 커밋하기 위해 필요
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: capture-snapshots
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Capture snapshot
+        run: python capture.py
+
+      - name: Commit CSV
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/snapshots.csv
+          if git diff --cached --quiet; then
+            echo "변경 없음 — 커밋 생략"
+          else
+            git commit -m "chore: snapshot $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
